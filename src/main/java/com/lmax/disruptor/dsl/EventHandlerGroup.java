@@ -21,7 +21,9 @@ import com.lmax.disruptor.Sequence;
 import com.lmax.disruptor.SequenceBarrier;
 import com.lmax.disruptor.WorkHandler;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * A group of {@link EventProcessor}s used as part of the {@link Disruptor}.
@@ -32,17 +34,58 @@ public class EventHandlerGroup<T>
 {
     private final Disruptor<T> disruptor;
     private final ConsumerRepository<T> consumerRepository;
-    private final Sequence[] sequences;
+    private final Sequence[] dependencySequences; // 依赖的序列
+    private final List<Sequence> nextDependencySequenceList = new ArrayList<Sequence>(); // 下一步需要的依赖的序列
+    private Sequence[] nextDependencySequence;
 
     EventHandlerGroup(
         final Disruptor<T> disruptor,
         final ConsumerRepository<T> consumerRepository,
-        final Sequence[] sequences)
-    {
+        final Sequence[] sequences) {
+
         this.disruptor = disruptor;
         this.consumerRepository = consumerRepository;
-        this.sequences = Arrays.copyOf(sequences, sequences.length);
+        this.dependencySequences = Arrays.copyOf(sequences, sequences.length);
+        this.add(sequences);
     }
+
+    Sequence[] add(Sequence... sequence) {
+        this.nextDependencySequenceList.addAll(Arrays.asList(sequence));
+        return sequence;
+    }
+
+    /** 增加一组新的handler到当前组中,且不依赖任何其他的组和handler, 用于disruptor中消费者第一组构建*/
+    public EventHandlerGroup<T> addNew(final EventHandler<? super T>... eventHandlers){
+        return disruptor.addCreateEventProcessors(this, new Sequence[0], eventHandlers);
+    }
+    /** 增加一组新的handler到当前组中,且不依赖任何其他的组和handler, 用于disruptor中消费者第一组构建*/
+    public EventHandlerGroup<T> addNew(final EventProcessorFactory<T>... processorFactories){
+        return disruptor.addCreateEventProcessors(this, new Sequence[0], processorFactories);
+    }
+    /** 增加一组新的handler到当前组中,且不依赖任何其他的组和handler, 用于disruptor中消费者第一组构建*/
+    public EventHandlerGroup<T> addWorkNew(final WorkHandler<? super T>... workHandlers){
+        return disruptor.addCreateWorkerPool(this, new Sequence[0], workHandlers);
+    }
+
+    /** 增加一组新的handler到当前组中,会依赖当前组的上一组中的handler */
+    public EventHandlerGroup<T> add(final EventHandler<? super T>... eventHandlers){
+        return disruptor.addCreateEventProcessors(this, dependencySequences, eventHandlers);
+    }
+    /** 增加一组新的handler到当前组中,会依赖当前组的上一组中的handler */
+    public EventHandlerGroup<T> add(final EventProcessorFactory<T>... processorFactories){
+        return disruptor.addCreateEventProcessors(this, dependencySequences, processorFactories);
+    }
+    /** 增加一组新的handler到当前组中,会依赖当前组的上一组中的handler */
+    public EventHandlerGroup<T> addWork(final WorkHandler<? super T>... workHandlers){
+        return disruptor.addCreateWorkerPool(this, dependencySequences, workHandlers);
+    }
+
+    private void convert(){
+        if (this.nextDependencySequence == null || nextDependencySequence.length != nextDependencySequenceList.size()) {
+            this.nextDependencySequence = this.nextDependencySequenceList.toArray(new Sequence[nextDependencySequenceList.size()]);
+        }
+    }
+
 
     /**
      * Create a new event handler group that combines the consumers in this group with <tt>otherHandlerGroup</tt>.
@@ -52,11 +95,11 @@ public class EventHandlerGroup<T>
      */
     public EventHandlerGroup<T> and(final EventHandlerGroup<T> otherHandlerGroup)
     {
-        final Sequence[] combinedSequences = new Sequence[this.sequences.length + otherHandlerGroup.sequences.length];
-        System.arraycopy(this.sequences, 0, combinedSequences, 0, this.sequences.length);
+        final Sequence[] combinedSequences = new Sequence[this.dependencySequences.length + otherHandlerGroup.dependencySequences.length];
+        System.arraycopy(this.dependencySequences, 0, combinedSequences, 0, this.dependencySequences.length);
         System.arraycopy(
-            otherHandlerGroup.sequences, 0,
-            combinedSequences, this.sequences.length, otherHandlerGroup.sequences.length);
+            otherHandlerGroup.dependencySequences, 0,
+            combinedSequences, this.dependencySequences.length, otherHandlerGroup.dependencySequences.length);
         return new EventHandlerGroup<T>(disruptor, consumerRepository, combinedSequences);
     }
 
@@ -68,14 +111,14 @@ public class EventHandlerGroup<T>
      */
     public EventHandlerGroup<T> and(final EventProcessor... processors)
     {
-        Sequence[] combinedSequences = new Sequence[sequences.length + processors.length];
+        Sequence[] combinedSequences = new Sequence[dependencySequences.length + processors.length];
 
         for (int i = 0; i < processors.length; i++)
         {
             consumerRepository.add(processors[i]);
             combinedSequences[i] = processors[i].getSequence();
         }
-        System.arraycopy(sequences, 0, combinedSequences, processors.length, sequences.length);
+        System.arraycopy(dependencySequences, 0, combinedSequences, processors.length, dependencySequences.length);
 
         return new EventHandlerGroup<T>(disruptor, consumerRepository, combinedSequences);
     }
@@ -144,7 +187,8 @@ public class EventHandlerGroup<T>
      */
     public EventHandlerGroup<T> handleEventsWith(final EventHandler<? super T>... handlers)
     {
-        return disruptor.createEventProcessors(sequences, handlers);
+        convert(); // 将list转换为数组
+        return disruptor.createEventProcessors(nextDependencySequence, handlers);
     }
 
     /**
@@ -161,7 +205,8 @@ public class EventHandlerGroup<T>
      */
     public EventHandlerGroup<T> handleEventsWith(final EventProcessorFactory<T>... eventProcessorFactories)
     {
-        return disruptor.createEventProcessors(sequences, eventProcessorFactories);
+        convert(); // 将list转换为数组
+        return disruptor.createEventProcessors(nextDependencySequence, eventProcessorFactories);
     }
 
     /**
@@ -179,7 +224,8 @@ public class EventHandlerGroup<T>
      */
     public EventHandlerGroup<T> handleEventsWithWorkerPool(final WorkHandler<? super T>... handlers)
     {
-        return disruptor.createWorkerPool(sequences, handlers);
+        convert(); // 将list转换为数组
+        return disruptor.createWorkerPool(nextDependencySequence, handlers);
     }
 
     /**
@@ -191,6 +237,7 @@ public class EventHandlerGroup<T>
      */
     public SequenceBarrier asSequenceBarrier()
     {
-        return disruptor.getRingBuffer().newBarrier(sequences);
+        convert(); // 将list转换为数组
+        return disruptor.getRingBuffer().newBarrier(nextDependencySequence);
     }
 }

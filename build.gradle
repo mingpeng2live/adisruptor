@@ -18,13 +18,14 @@ apply plugin: 'osgi'
 apply plugin: 'maven'
 apply plugin: 'signing'
 apply plugin: 'eclipse'   // Only used so the Eclipse STS Gradle plugin can see the 'perf' source set dependencies. :-(
-apply plugin: 'checkstyle'
+//apply plugin: 'checkstyle'
 apply plugin: 'idea'
 
 defaultTasks 'build'
 
 group = 'com.lmax'
-version = new Version(major: 3, minor: 3, revision: 6)
+//version = new Version(major: 3, minor: 3, revision: 6)
+version = new Version(major: 3, minor: 3, revision: 6, snapshot: true)
 
 ext {
     fullName = 'Disruptor Framework'
@@ -35,9 +36,12 @@ ext {
 
     javaCompilerExecutable = System.env['JAVA_HOME'] ? System.env['JAVA_HOME'] + '/bin/javac' : 'javac'
 
-    if (!project.hasProperty('sonatypeUrl')) sonatypeUrl = 'https://oss.sonatype.org/service/local/staging/deploy/maven2'
-    if (!project.hasProperty('sonatypeUsername')) sonatypeUsername = ''
-    if (!project.hasProperty('sonatypePassword')) sonatypePassword = ''
+//    if (!project.hasProperty('sonatypeUrl')) sonatypeUrl = 'https://oss.sonatype.org/service/local/staging/deploy/maven2'
+//    if (!project.hasProperty('sonatypeUsername')) sonatypeUsername = ''
+//    if (!project.hasProperty('sonatypePassword')) sonatypePassword = ''
+    if (!project.hasProperty('sonatypeUrl')) sonatypeUrl = 'http://10.20.22.137:8091/nexus/content/repositories/snapshots'
+    if (!project.hasProperty('sonatypeUsername')) sonatypeUsername = 'ipg-dev'
+    if (!project.hasProperty('sonatypePassword')) sonatypePassword = 'admaster'
 }
 
 sourceSets {

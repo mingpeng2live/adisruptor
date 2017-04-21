@@ -566,7 +566,6 @@ public class Disruptor<T>
         final SequenceBarrier sequenceBarrier = ringBuffer.newBarrier(barrierSequences);
         final WorkerPool<T> workerPool = new WorkerPool<T>(ringBuffer, sequenceBarrier, exceptionHandler, workHandlers);
 
-
         consumerRepository.add(workerPool, sequenceBarrier);
 
         Sequence[] workerSequences = workerPool.getWorkerSequences();
@@ -575,6 +574,72 @@ public class Disruptor<T>
 
         return new EventHandlerGroup<T>(this, consumerRepository, workerSequences);
     }
+
+
+    /**   add pengming start   */
+
+    EventHandlerGroup<T> addCreateEventProcessors(final EventHandlerGroup<T> group, final Sequence[] barrierSequences, final EventHandler<? super T>[] eventHandlers) {
+        checkNotStarted();
+
+        final Sequence[] processorSequences = new Sequence[eventHandlers.length];
+        final SequenceBarrier barrier = ringBuffer.newBarrier(barrierSequences);
+
+        for (int i = 0; i < eventHandlers.length; i++) {
+            EventHandler<? super T> eventHandler = eventHandlers[i];
+            BatchEventProcessor<T> batchEventProcessor = new BatchEventProcessor<T>(ringBuffer, barrier, eventHandler);
+
+            consumerRepository.add(batchEventProcessor, eventHandler, barrier);
+            processorSequences[i] = batchEventProcessor.getSequence();
+
+            if (exceptionHandler != null) {
+                batchEventProcessor.setExceptionHandler(exceptionHandler);
+            }
+        }
+
+        updateGatingSequencesForNextInChain(barrierSequences, processorSequences);
+
+        group.add(processorSequences); // add sequence to EventHandlerGroup
+        return group;
+    }
+
+
+    EventHandlerGroup<T> addCreateEventProcessors(final EventHandlerGroup<T> group, final Sequence[] barrierSequences, final EventProcessorFactory<T>[] processorFactories) {
+        final EventProcessor[] eventProcessors = new EventProcessor[processorFactories.length];
+        for (int i = 0; i < processorFactories.length; i++) {
+            eventProcessors[i] = processorFactories[i].createEventProcessor(ringBuffer, barrierSequences);
+        }
+
+        for (final EventProcessor processor : eventProcessors) {
+            consumerRepository.add(processor);
+        }
+
+        Sequence[] sequences = new Sequence[eventProcessors.length];
+        for (int i = 0; i < eventProcessors.length; i++) {
+            sequences[i] = eventProcessors[i].getSequence();
+        }
+
+        ringBuffer.addGatingSequences(sequences);
+
+        group.add(sequences); // add sequence to EventHandlerGroup
+        return group;
+    }
+
+    EventHandlerGroup<T> addCreateWorkerPool(final EventHandlerGroup<T> group, final Sequence[] barrierSequences, final WorkHandler<? super T>[] workHandlers)
+    {
+        final SequenceBarrier sequenceBarrier = ringBuffer.newBarrier(barrierSequences);
+        final WorkerPool<T> workerPool = new WorkerPool<T>(ringBuffer, sequenceBarrier, exceptionHandler, workHandlers);
+
+        consumerRepository.add(workerPool, sequenceBarrier);
+
+        Sequence[] workerSequences = workerPool.getWorkerSequences();
+
+        updateGatingSequencesForNextInChain(barrierSequences, workerSequences);
+
+        group.add(workerSequences); // add sequence to EventHandlerGroup
+        return group;
+    }
+
+    /**   add pengming end   */
 
     private void checkNotStarted()
     {
